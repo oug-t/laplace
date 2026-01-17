@@ -1,0 +1,19 @@
+{
+    "name": "laplace-uc",
+    "private": true,
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "three": "^0.160.0"
+    },
+    "devDependencies": {
+        "@types/three": "^0.160.0",
+        "typescript": "^5.2.2",
+        "vite": "^7.3.1"
+    }
+}
