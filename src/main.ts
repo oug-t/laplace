@@ -1,13 +1,19 @@
-import "./style.css"; // Assume basic CSS reset
+import "./style.css";
 import { TimeController } from "./core/TimeController";
 import { SceneManager } from "./render/SceneManager";
 
-// 1. Init Core Systems
-const timeCtrl = new TimeController(79.0); // Start at UC 0079
+// ----------------------------------------
+// Core initialization
+// ----------------------------------------
+
+const timeCtrl = new TimeController(79.0); // UC 0079 start
 const appContainer = document.querySelector<HTMLDivElement>("#app")!;
 const sceneMgr = new SceneManager(appContainer);
 
-// 2. UI Elements (Minimal Vanilla JS)
+// ----------------------------------------
+// UI overlays (DOM)
+// ----------------------------------------
+
 const infoPanel = document.createElement("div");
 infoPanel.style.position = "absolute";
 infoPanel.style.top = "20px";
@@ -31,10 +37,13 @@ timeDisplay.style.fontFamily = "monospace";
 timeDisplay.style.fontSize = "24px";
 document.body.appendChild(timeDisplay);
 
-// 3. Input Handling
+// ----------------------------------------
+// Input handling
+// ----------------------------------------
+
 window.addEventListener("wheel", (e) => {
     if (e.shiftKey) {
-        timeCtrl.handleScroll(e.deltaY);
+        timeCtrl.handleScroll(e.deltaY); // travel through the timeline
     }
 });
 
@@ -51,17 +60,17 @@ window.addEventListener("click", (e) => {
     }
 });
 
-// 4. Main Loop
+// ----------------------------------------
+// Main loop
+// ----------------------------------------
+
 function animate() {
     requestAnimationFrame(animate);
 
-    // Update logic
     timeCtrl.update();
 
-    // Update visual state
     timeDisplay.innerText = `UC 00${timeCtrl.currentYear.toFixed(2)}`;
 
-    // Draw
     sceneMgr.render(timeCtrl);
 }
 
