@@ -1,7 +1,5 @@
 import * as THREE from "three";
-// Import OrbitControls
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-
 import { TimeController } from "../core/TimeController";
 import { createStarfield } from "./components/Starfield";
 import { BackgroundShader } from "./components/BackgroundShader";
@@ -11,11 +9,10 @@ export class SceneManager {
     public scene: THREE.Scene;
     public camera: THREE.PerspectiveCamera;
     public renderer: THREE.WebGLRenderer;
-    public controls: OrbitControls; // Added Controls property
+    public controls: OrbitControls;
 
     private raycaster: THREE.Raycaster;
     private mouse: THREE.Vector2;
-
     private earthGroup: THREE.Group;
     private moonGroup: THREE.Group;
     private backgroundShader: BackgroundShader;
@@ -24,7 +21,10 @@ export class SceneManager {
     constructor(container: HTMLElement) {
         this.scene = new THREE.Scene();
 
-        // 1. Setup Camera
+        // ----------------------------------------
+        // Camera
+        // ----------------------------------------
+
         this.camera = new THREE.PerspectiveCamera(
             45,
             window.innerWidth / window.innerHeight,
@@ -34,7 +34,10 @@ export class SceneManager {
         this.camera.position.set(0, 15, 35);
         this.camera.lookAt(0, 0, 0);
 
-        // 2. Setup Renderer
+        // ----------------------------------------
+        // Renderer
+        // ----------------------------------------
+
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
             alpha: false,
@@ -43,7 +46,10 @@ export class SceneManager {
         this.renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(this.renderer.domElement);
 
-        // 3. Setup Controls (Navigation)
+        // ----------------------------------------
+        // Controls
+        // ----------------------------------------
+
         this.controls = new OrbitControls(
             this.camera,
             this.renderer.domElement
@@ -54,14 +60,19 @@ export class SceneManager {
         this.controls.maxDistance = 100;
         this.controls.enablePan = true;
 
-        // 4. Background & Environment
+        // ----------------------------------------
+        // Backgrond
+        // ----------------------------------------
+
         this.backgroundShader = new BackgroundShader();
         this.scene.add(this.backgroundShader.mesh);
 
         const starfield = createStarfield(4000);
         this.scene.add(starfield);
 
-        // 5. Lighting
+        // ----------------------------------------
+        // Lighting
+        // ----------------------------------------
         const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
         sunLight.position.set(50, 20, 30);
         this.scene.add(sunLight);
@@ -125,7 +136,9 @@ export class SceneManager {
         });
         this.earthGroup.add(new THREE.Points(pointsGeo, pointsMat));
 
-        // --- Moon ---
+        // ----------------------------------------
+        // Moon
+        // ----------------------------------------
         this.moonGroup = new THREE.Group();
         this.scene.add(this.moonGroup);
 
@@ -165,7 +178,6 @@ export class SceneManager {
     }
 
     public render(timeController: TimeController) {
-        // REQUIRED: Update controls
         this.controls.update();
 
         if (this.moonGroup)

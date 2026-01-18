@@ -11,7 +11,7 @@ export class GraphManager {
     public constructor() {
         this.group = new THREE.Group();
 
-        // --- 1. NODES (Points) ---
+        // Nodes
         const nodeGeo = new THREE.BufferGeometry();
 
         const positions: number[] = [];
@@ -111,7 +111,7 @@ export class GraphManager {
         this.pointSystem = new THREE.Points(nodeGeo, this.pointMat);
         this.group.add(this.pointSystem);
 
-        // --- 2. LINKS (LineSegments) ---
+        // Links
         const lineGeo = new THREE.BufferGeometry();
         const linePos: number[] = [];
         const lineCols: number[] = [];
@@ -147,7 +147,6 @@ export class GraphManager {
         this.lineSystem = new THREE.LineSegments(lineGeo, lineMat);
         this.group.add(this.lineSystem);
 
-        // --- 3. LAGRANGE BELT (Replaced Generic Orbits) ---
         this.createLagrangeBelt();
 
         window.addEventListener("resize", () => {
@@ -199,10 +198,7 @@ export class GraphManager {
         return tex;
     }
 
-    // New Helper: Connects major colonies in a smooth orbital loop
     private createLagrangeBelt() {
-        // 1. Filter for relevant hubs (Sides, Moon, Axis)
-        // We exclude Earth Core to keep the ring essentially "orbital"
         const hubs = DATA_SET.nodes.filter(
             (n) =>
                 n.id !== "earth_core" &&
@@ -213,10 +209,8 @@ export class GraphManager {
                     n.id.includes("Axis"))
         );
 
-        if (hubs.length < 3) return; // Need at least 3 points for a meaningful loop
+        if (hubs.length < 3) return;
 
-        // 2. Sort by Polar Angle (XZ Plane)
-        // This ensures we connect them in a circle rather than a messy zigzag
         const sortedHubs = hubs
             .map((n) => {
                 const vec = new THREE.Vector3(
@@ -224,12 +218,11 @@ export class GraphManager {
                     n.position[1],
                     n.position[2]
                 );
-                const angle = Math.atan2(vec.z, vec.x); // Angle around Y-axis
+                const angle = Math.atan2(vec.z, vec.x);
                 return { vec, angle };
             })
             .sort((a, b) => a.angle - b.angle);
 
-        // 3. Create a Smooth Closed Curve
         const points = sortedHubs.map((item) => item.vec);
         const curve = new THREE.CatmullRomCurve3(
             points,
@@ -238,15 +231,13 @@ export class GraphManager {
             0.5
         );
 
-        // Sample the curve for smoothness
         const curvePoints = curve.getPoints(200);
         const geometry = new THREE.BufferGeometry().setFromPoints(curvePoints);
 
-        // 4. Create Material (HUD Style)
         const material = new THREE.LineBasicMaterial({
             color: 0x00aaff, // Cyan/Electric Blue
             transparent: true,
-            opacity: 0.25, // Subtle overlay
+            opacity: 0.25,
             blending: THREE.AdditiveBlending,
             depthWrite: false, // No depth writing (transparency fix)
             depthTest: false, // ALWAYS render on top (HUD style)
