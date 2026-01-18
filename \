@@ -70,7 +70,7 @@ export class SceneManager {
         window.addEventListener('keyup', (e) => {
             if (e.key === 'Shift') {
                 this.shiftPressed = false;
-                this.controls.enableZoom = true;
+                this.controls.enableZoom = true; 
             }
         });
 
