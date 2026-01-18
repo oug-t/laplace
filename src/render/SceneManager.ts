@@ -1,4 +1,7 @@
 import * as THREE from "three";
+// Import OrbitControls
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+
 import { TimeController } from "../core/TimeController";
 import { createStarfield } from "./components/Starfield";
 import { BackgroundShader } from "./components/BackgroundShader";
@@ -8,6 +11,7 @@ export class SceneManager {
     public scene: THREE.Scene;
     public camera: THREE.PerspectiveCamera;
     public renderer: THREE.WebGLRenderer;
+    public controls: OrbitControls; // Added Controls property
 
     private raycaster: THREE.Raycaster;
     private mouse: THREE.Vector2;
@@ -30,7 +34,7 @@ export class SceneManager {
         this.camera.position.set(0, 15, 35);
         this.camera.lookAt(0, 0, 0);
 
-        // 2. Setup Renderer (Crisp, Technical)
+        // 2. Setup Renderer
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
             alpha: false,
@@ -39,21 +43,31 @@ export class SceneManager {
         this.renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(this.renderer.domElement);
 
-        // 3. Add The "Deep Void" Shader
+        // 3. Setup Controls (Navigation)
+        this.controls = new OrbitControls(
+            this.camera,
+            this.renderer.domElement
+        );
+        this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.05;
+        this.controls.minDistance = 5;
+        this.controls.maxDistance = 100;
+        this.controls.enablePan = true;
+
+        // 4. Background & Environment
         this.backgroundShader = new BackgroundShader();
         this.scene.add(this.backgroundShader.mesh);
 
-        // 4. Add Crisp White Stars (Data Points)
         const starfield = createStarfield(4000);
         this.scene.add(starfield);
 
-        // 5. Lighting (Flat and Technical)
+        // 5. Lighting
         const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
         sunLight.position.set(50, 20, 30);
         this.scene.add(sunLight);
-        this.scene.add(new THREE.AmbientLight(0x404040, 3.0)); // High visibility for wireframes
+        this.scene.add(new THREE.AmbientLight(0x404040, 3.0));
 
-        // 6. Build Systems
+        // 6. Build Systems (Holo Earth)
         this.buildHoloEarth();
 
         this.battleMgr = new BattleManager();
@@ -69,17 +83,17 @@ export class SceneManager {
         this.scene.add(this.earthGroup);
         const r = 4;
 
-        // LAYER 1: Occlusion Core (Black sphere to block stars behind Earth)
+        // Layer 1: Occlusion Core
         const coreGeo = new THREE.SphereGeometry(r * 0.98, 32, 32);
         const coreMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
         this.earthGroup.add(new THREE.Mesh(coreGeo, coreMat));
 
-        // LAYER 2: Holo Grid (The "Wireframe")
+        // Layer 2: Holo Grid
         const wireGeo = new THREE.WireframeGeometry(
             new THREE.IcosahedronGeometry(r, 4)
         );
         const wireMat = new THREE.LineBasicMaterial({
-            color: 0x0055aa, // Deep Technical Blue (Darker than cyan)
+            color: 0x0055aa,
             transparent: true,
             opacity: 0.3,
             blending: THREE.AdditiveBlending,
@@ -87,7 +101,7 @@ export class SceneManager {
         const wireMesh = new THREE.LineSegments(wireGeo, wireMat);
         this.earthGroup.add(wireMesh);
 
-        // LAYER 3: Data Nodes (Cities)
+        // Layer 3: Data Nodes
         const pointsGeo = new THREE.BufferGeometry();
         const positions = [];
         for (let i = 0; i < 300; i++) {
@@ -103,7 +117,7 @@ export class SceneManager {
             new THREE.Float32BufferAttribute(positions, 3)
         );
         const pointsMat = new THREE.PointsMaterial({
-            color: 0xaaccff, // Pale Blue/White
+            color: 0xaaccff,
             size: 0.1,
             transparent: true,
             opacity: 0.8,
@@ -111,11 +125,10 @@ export class SceneManager {
         });
         this.earthGroup.add(new THREE.Points(pointsGeo, pointsMat));
 
-        // --- MOON ---
+        // --- Moon ---
         this.moonGroup = new THREE.Group();
         this.scene.add(this.moonGroup);
 
-        // Orbit Line
         const orbitRadius = 15;
         const orbitCurve = new THREE.EllipseCurve(
             0,
@@ -139,7 +152,6 @@ export class SceneManager {
         orbitLine.rotation.x = Math.PI / 2;
         this.scene.add(orbitLine);
 
-        // Holo Moon
         const moonGeo = new THREE.IcosahedronGeometry(1.0, 2);
         const moonWireGeo = new THREE.WireframeGeometry(moonGeo);
         const moonMat = new THREE.LineBasicMaterial({
@@ -153,20 +165,22 @@ export class SceneManager {
     }
 
     public render(timeController: TimeController) {
+        // REQUIRED: Update controls
+        this.controls.update();
+
         if (this.moonGroup)
             this.moonGroup.rotation.y = timeController.currentYear * 0.5;
         if (this.earthGroup) {
             this.earthGroup.rotation.y += 0.001;
-            // Counter-rotate the wireframe for "active scanning" look
             this.earthGroup.children[1].rotation.y -= 0.0005;
         }
 
-        // No update needed for background shader (it's static black)
         if (this.battleMgr) this.battleMgr.update(timeController.currentYear);
 
         this.renderer.render(this.scene, this.camera);
     }
 
+    // ... (Keep existing interaction/resize logic)
     public checkInteractions(x: number, y: number): any {
         this.mouse.set(
             (x / window.innerWidth) * 2 - 1,

@@ -33,7 +33,9 @@ document.body.appendChild(timeDisplay);
 
 // 3. Input Handling
 window.addEventListener("wheel", (e) => {
-    timeCtrl.handleScroll(e.deltaY);
+    if (e.shiftKey) {
+        timeCtrl.handleScroll(e.deltaY);
+    }
 });
 
 window.addEventListener("click", (e) => {
