@@ -23,10 +23,12 @@ export class SceneManager {
     private backgroundShader: BackgroundShader;
     private battleMgr: BattleManager;
     private shiftPressed: boolean;
+    private lastRenderTime: number;
 
     constructor(container: HTMLElement) {
         this.scene = new THREE.Scene();
         this.shiftPressed = false;
+        this.lastRenderTime = performance.now();
 
         // Camera
         this.camera = new THREE.PerspectiveCamera(
@@ -45,6 +47,7 @@ export class SceneManager {
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setClearColor(0x000010); // Deep space blue-black
         container.appendChild(this.renderer.domElement);
 
         // Controls
@@ -211,18 +214,84 @@ export class SceneManager {
     }
 
     public render(timeController: TimeController) {
+        // Update controls first
         this.controls.update();
 
-        if (this.moonGroup)
-            this.moonGroup.rotation.y = timeController.currentYear * 0.5;
-        if (this.earthGroup) {
-            this.earthGroup.rotation.y += 0.001;
-            this.earthGroup.children[1].rotation.y -= 0.0005;
+        const currentYear = timeController.currentYear;
+        const normalizedYear = (currentYear - 1) / 99; // UC 0001-0100 normalized to 0-1
+
+        // Temporal update for all systems
+        this.updateTemporalSystems(currentYear, normalizedYear, timeController);
+
+        // EVE-inspired subtle background pulse
+        this.updateBackgroundPulse(timeController);
+
+        // Render frame
+        this.renderer.render(this.scene, this.camera);
+
+        // Update render timestamp
+        this.lastRenderTime = performance.now();
+    }
+
+    /**
+     * Update all temporal elements with current year context
+     */
+    /**
+     * Update all temporal elements with current year context
+     */
+    private updateTemporalSystems(
+        currentYear: number,
+        normalizedYear: number,
+        timeController: TimeController
+    ): void {
+        // Moon orbital position (linked to timeline)
+        if (this.moonGroup) {
+            // Full orbit every ~10 UC years for visual reference
+            this.moonGroup.rotation.y = currentYear * 0.2;
+
+            // FIX: Update moon position to follow orbit
+            const orbitRadius = 15;
+            const orbitProgress = currentYear * 0.2; // Same as rotation for consistency
+            this.moonGroup.position.x = Math.cos(orbitProgress) * orbitRadius;
+            this.moonGroup.position.z = Math.sin(orbitProgress) * orbitRadius;
+            this.moonGroup.position.y = 0;
         }
 
-        if (this.battleMgr) this.battleMgr.update(timeController.currentYear);
+        // Rest of your code...
+    }
 
-        this.renderer.render(this.scene, this.camera);
+    /**
+     * EVE-inspired subtle environmental effects
+     */
+    private updateBackgroundPulse(timeController: TimeController): void {
+        // Subtle background pulse when time is moving
+        if (timeController.isMoving && timeController.isMoving()) {
+            const pulse = Math.sin(performance.now() * 0.002) * 0.05 + 0.95;
+            this.renderer.setClearColor(
+                new THREE.Color(0x000010).multiplyScalar(pulse)
+            );
+        } else {
+            this.renderer.setClearColor(0x000010);
+        }
+
+        // Time transition glow effect
+        if (timeController.inTransition && timeController.inTransition()) {
+            const transitionStartTime =
+                (timeController as any).transitionStartTime || 0;
+            const transitionProgress = Math.min(
+                (performance.now() - transitionStartTime) / 300,
+                1
+            );
+            const glowIntensity = Math.sin(transitionProgress * Math.PI) * 0.1;
+
+            // Add subtle post-processing-like effect via shader uniform
+            if (
+                this.backgroundShader &&
+                typeof (this.backgroundShader as any).setGlow === 'function'
+            ) {
+                (this.backgroundShader as any).setGlow(glowIntensity);
+            }
+        }
     }
 
     public checkInteractions(x: number, y: number): InteractionData | null {
@@ -249,8 +318,11 @@ export class SceneManager {
      * Cleanup method to dispose of Three.js resources
      */
     public dispose(): void {
+        // Remove event listeners
         window.removeEventListener('keydown', () => {});
         window.removeEventListener('keyup', () => {});
+
+        // Dispose Three.js resources
         this.renderer.dispose();
         this.controls.dispose();
         this.scene.traverse((object) => {
@@ -263,5 +335,39 @@ export class SceneManager {
                 }
             }
         });
+    }
+
+    /**
+     * For future expansion: temporal highlighting system
+     */
+    public highlightTemporalRange(startYear: number, endYear: number): void {
+        // Could be used for highlighting specific UC eras or events
+        // Implementation depends on your visual design
+        console.log(`Highlighting UC ${startYear} - UC ${endYear}`);
+    }
+
+    /**
+     * Jump to a specific temporal viewpoint
+     */
+    public focusOnYear(year: number): void {
+        // Smooth camera transition to focus on timeline position
+        const targetPosition = new THREE.Vector3(
+            0,
+            15,
+            35 - (year / 100) * 10 // Example: move along Z based on year
+        );
+
+        // Could implement smooth camera interpolation here
+        this.camera.position.lerp(targetPosition, 0.1);
+        this.controls.target.set(0, 0, 0);
+    }
+
+    /**
+     * Reset view to default temporal position
+     */
+    public resetTemporalView(): void {
+        this.camera.position.set(0, 15, 35);
+        this.controls.target.set(0, 0, 0);
+        this.controls.update();
     }
 }

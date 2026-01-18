@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { DATA_SET } from '../core/GundamData';
 
-// Add interface for node interaction data
 export interface NodeInteractionData {
     name: string;
     desc: string;
@@ -69,16 +68,9 @@ export class GraphManager {
         );
         nodeGeo.setAttribute('aEnd', new THREE.Float32BufferAttribute(ends, 1));
 
-        // Add node IDs for interaction
-        const nodeIds: number[] = [];
-        DATA_SET.nodes.forEach((n, i) => nodeIds.push(i));
-        nodeGeo.setAttribute(
-            'nodeId',
-            new THREE.Float32BufferAttribute(nodeIds, 1)
-        );
-
         const dotTex = this.createDotTexture();
 
+        // FIXED: Correct uniforms declaration
         this.pointMat = new THREE.ShaderMaterial({
             transparent: true,
             depthWrite: false,
@@ -86,68 +78,64 @@ export class GraphManager {
             uniforms: {
                 uMap: { value: dotTex },
                 uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
-                uBaseSize: { value: 12.0 },
+                uBaseSize: { value: 8.0 },
                 uCurrentYear: { value: 0 },
-                uHoveredNode: { value: -1.0 },
                 uTime: { value: 0.0 },
+                // Removed uHoverYear and uFocusRadius since shader doesn't use them
+                // Added uHoveredNode for hover effect
+                uHoveredNode: { value: -1.0 },
             },
+            // FIXED: Corrected vertex shader
             vertexShader: `
                 attribute float aSize;
                 attribute vec3 aColor;
                 attribute float aStart;
                 attribute float aEnd;
-                attribute float nodeId;
                 varying vec3 vColor;
-                varying float vVisible;
-                varying float vNodeId;
-                uniform float uPixelRatio;
-                uniform float uBaseSize;
+                varying float vAlpha;
                 uniform float uCurrentYear;
                 uniform float uHoveredNode;
                 uniform float uTime;
+                
                 void main() {
-                    vNodeId = nodeId;
                     vColor = aColor;
-                    float isAlive = step(aStart, uCurrentYear) * step(uCurrentYear, aEnd);
-                    vVisible = isAlive;
                     
-                    // Hover effect
+                    // Temporal fade-in/out
+                    float yearProgress = (uCurrentYear - aStart) / max(aEnd - aStart, 0.001);
+                    float visibility = smoothstep(0.0, 0.2, yearProgress) * 
+                                      (1.0 - smoothstep(0.8, 1.0, yearProgress));
+                    
+                    // Hover effect (simplified)
                     float hoverEffect = 0.0;
-                    if (abs(nodeId - uHoveredNode) < 0.5) {
-                        hoverEffect = sin(uTime * 5.0) * 0.3 + 0.7;
-                    }
+                    
+                    vAlpha = visibility;
+                    
+                    // Size with optional hover pulse
+                    float size = aSize * (1.0 + hoverEffect * 0.3);
                     
                     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-                    if (isAlive < 0.5) {
-                         gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-                    } else {
-                        float dist = -mvPosition.z;
-                        float baseSize = uBaseSize * aSize * uPixelRatio;
-                        float size = baseSize * (1.0 + hoverEffect);
-                        gl_PointSize = size * (40.0 / dist);
-                        gl_Position = projectionMatrix * mvPosition;
-                    }
+                    float dist = max(-mvPosition.z, 1.0);
+                    gl_PointSize = size * 30.0 / dist;
+                    gl_Position = projectionMatrix * mvPosition;
                 }
             `,
+            // FIXED: Corrected fragment shader
             fragmentShader: `
                 uniform sampler2D uMap;
                 varying vec3 vColor;
-                varying float vVisible;
-                varying float vNodeId;
-                uniform float uHoveredNode;
+                varying float vAlpha;
+                
                 void main() {
-                    if (vVisible < 0.1) discard;
                     vec4 tex = texture2D(uMap, gl_PointCoord);
+                    
+                    // Discard transparent edges
                     if (tex.a < 0.05) discard;
                     
-                    // Hover highlight
-                    float isHovered = abs(vNodeId - uHoveredNode) < 0.5 ? 1.0 : 0.0;
-                    vec3 finalColor = vColor;
-                    if (isHovered > 0.5) {
-                        finalColor = mix(vColor, vec3(1.0, 1.0, 0.8), 0.5);
-                    }
+                    // Simple glow effect
+                    float dist = length(gl_PointCoord - vec2(0.5));
+                    float alpha = tex.a * vAlpha * (1.0 - smoothstep(0.3, 0.5, dist));
                     
-                    gl_FragColor = vec4(finalColor, tex.a * (0.8 + isHovered * 0.2));
+                    gl_FragColor = vec4(vColor, alpha);
                 }
             `,
         });
@@ -200,41 +188,25 @@ export class GraphManager {
             );
         });
 
-        // Keyboard event listeners for shift key
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'Shift') {
-                this.shiftPressed = true;
-                this.onShiftStateChange(true);
-            }
-        });
-
-        window.addEventListener('keyup', (e) => {
-            if (e.key === 'Shift') {
-                this.shiftPressed = false;
-                this.onShiftStateChange(false);
-            }
+        // DEBUG: Log initialization
+        console.log('GraphManager created:', {
+            nodes: DATA_SET.nodes.length,
+            edges: DATA_SET.edges.length,
+            material: this.pointMat,
+            uniforms: this.pointMat.uniforms,
         });
     }
 
     public update(time: number, currentYear: number): void {
         const t = time * 0.001;
-        this.pointMat.uniforms.uBaseSize.value = 12.0 + Math.sin(t * 0.5) * 1.0;
         this.pointMat.uniforms.uTime.value = t;
-        this.group.rotation.y = t * 0.02;
         this.pointMat.uniforms.uCurrentYear.value = currentYear;
-    }
 
-    /**
-     * Check for node interactions at screen coordinates
-     */
-    public checkInteractions(
-        x: number,
-        y: number,
-        camera: THREE.Camera
-    ): NodeInteractionData | null {
-        // This would need to be implemented with raycaster
-        // For now, returns null - implement when you need click interactions on nodes
-        return null;
+        // Subtle pulse effect
+        this.pointMat.uniforms.uBaseSize.value = 8.0 + Math.sin(t * 0.5) * 0.5;
+
+        // Slow rotation
+        this.group.rotation.y = t * 0.01;
     }
 
     /**
@@ -246,28 +218,20 @@ export class GraphManager {
             nodeId !== null ? nodeId : -1.0;
     }
 
-    /**
-     * Called when shift key state changes
-     */
     private onShiftStateChange(pressed: boolean): void {
         this.shiftPressed = pressed;
 
-        // Visual feedback when shift is pressed
         if (pressed) {
-            this.pointMat.uniforms.uBaseSize.value *= 1.2; // Slightly enlarge nodes
+            this.pointMat.uniforms.uBaseSize.value = 9.6; // 8.0 * 1.2
         } else {
-            this.pointMat.uniforms.uBaseSize.value = 12.0; // Reset to default
+            this.pointMat.uniforms.uBaseSize.value = 8.0;
         }
 
-        // Optional: Change link visibility based on shift
         if (this.lineSystem.material instanceof THREE.LineBasicMaterial) {
             this.lineSystem.material.opacity = pressed ? 0.15 : 0.08;
         }
     }
 
-    /**
-     * Get current shift state
-     */
     public isShiftPressed(): boolean {
         return this.shiftPressed;
     }
@@ -281,11 +245,14 @@ export class GraphManager {
         if (!ctx) throw new Error('Canvas 2D context failed');
 
         const c = size / 2;
+
+        // Solid white circle
         ctx.beginPath();
         ctx.arc(c, c, size * 0.3, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(255, 255, 255, 1.0)';
         ctx.fill();
 
+        // Soft glow gradient
         const grad = ctx.createRadialGradient(
             c,
             c,
@@ -294,11 +261,12 @@ export class GraphManager {
             c,
             size * 0.5
         );
-        grad.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
+        grad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
         grad.addColorStop(1, 'rgba(255, 255, 255, 0.0)');
-        ctx.fillStyle = grad;
+
         ctx.beginPath();
         ctx.arc(c, c, size * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
         ctx.fill();
 
         const tex = new THREE.CanvasTexture(canvas);
@@ -317,33 +285,27 @@ export class GraphManager {
                     n.id.includes('Axis'))
         );
 
-        if (hubs.length < 3) return;
+        if (hubs.length < 3) {
+            console.log('Not enough hubs for Lagrange belt:', hubs.length);
+            return;
+        }
 
-        const sortedHubs = hubs
-            .map((n) => {
-                const vec = new THREE.Vector3(
-                    n.position[0],
-                    n.position[1],
-                    n.position[2]
-                );
-                const angle = Math.atan2(vec.z, vec.x);
-                return { vec, angle };
-            })
-            .sort((a, b) => a.angle - b.angle);
+        const points = hubs.map(
+            (n) =>
+                new THREE.Vector3(n.position[0], n.position[1], n.position[2])
+        );
 
-        const points = sortedHubs.map((item) => item.vec);
         const curve = new THREE.CatmullRomCurve3(
             points,
             true,
             'centripetal',
             0.5
         );
-
         const curvePoints = curve.getPoints(200);
         const geometry = new THREE.BufferGeometry().setFromPoints(curvePoints);
 
         const material = new THREE.LineBasicMaterial({
-            color: 0x00aaff, // Cyan/Electric Blue
+            color: 0x00aaff,
             transparent: true,
             opacity: 0.25,
             blending: THREE.AdditiveBlending,
@@ -353,14 +315,13 @@ export class GraphManager {
 
         const belt = new THREE.LineLoop(geometry, material);
         this.group.add(belt);
+
+        console.log('Lagrange belt created with', hubs.length, 'hubs');
     }
 
-    /**
-     * Cleanup resources
-     */
     public dispose(): void {
         this.pointSystem.geometry.dispose();
-        (this.pointSystem.material as THREE.Material).dispose();
+        this.pointMat.dispose();
         this.lineSystem.geometry.dispose();
         this.lineSystem.material.dispose();
         this.group.traverse((child) => {

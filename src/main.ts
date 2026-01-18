@@ -57,6 +57,20 @@ Object.assign(timeDisplay.style, {
 });
 document.body.appendChild(timeDisplay);
 
+// Add time feedback UI
+const timeFeedback = document.createElement('div');
+Object.assign(timeFeedback.style, {
+    position: 'absolute',
+    bottom: '60px',
+    left: '20px',
+    color: '#8899aa',
+    fontFamily: 'monospace',
+    fontSize: '11px',
+    opacity: '0.7',
+    transition: 'color 0.3s',
+});
+document.body.appendChild(timeFeedback);
+
 // Event Handlers
 const handleCanvasClick = (e: MouseEvent): void => {
     const data = sceneMgr.checkInteractions(e.clientX, e.clientY);
@@ -81,14 +95,12 @@ const handleWheel = (e: WheelEvent): void => {
         // Shift + wheel: navigate timeline
         e.preventDefault(); // IMPORTANT: Prevent OrbitControls from also zooming
         if (timeCtrl.handleScroll) {
-            timeCtrl.handleScroll(e.deltaY);
+            timeCtrl.handleScroll(e.deltaY * 0.01);
         }
-    } else {
-        // Normal wheel: OrbitControls handle automatically
     }
+    // Normal wheel: OrbitControls handles zoom automatically
 };
 
-// Add these missing functions:
 const handleKeyDown = (e: KeyboardEvent): void => {
     if (e.key === 'Shift') {
         shiftPressed = true;
@@ -111,7 +123,7 @@ const escapeHtml = (text: string): string => {
     return div.innerHTML;
 };
 
-// Register event listeners (only once each)
+// Register event listeners
 window.addEventListener('click', handleCanvasClick);
 window.addEventListener('wheel', handleWheel);
 window.addEventListener('keydown', handleKeyDown);
@@ -120,8 +132,28 @@ window.addEventListener('keyup', handleKeyUp);
 // Main render loop
 const animate = (): void => {
     requestAnimationFrame(animate);
+
+    // Update time controller
     timeCtrl.update();
+
+    // Update UI displays
     timeDisplay.textContent = `${CONFIG.TIME_PREFIX}${timeCtrl.currentYear.toFixed(2)}`;
+
+    // Update time feedback indicator
+    if (timeCtrl.isMoving && timeCtrl.isMoving()) {
+        timeFeedback.textContent = '▶';
+        timeFeedback.style.color = '#ffcc00';
+    } else {
+        timeFeedback.textContent = '▪';
+        timeFeedback.style.color = '#8899aa';
+    }
+
+    // Update transition feedback
+    if (timeCtrl.inTransition && timeCtrl.inTransition()) {
+        timeFeedback.style.color = '#ffcc00';
+    }
+
+    // Render scene
     sceneMgr.render(timeCtrl);
 };
 
