@@ -6,18 +6,19 @@ export class GraphManager {
 
     private pointSystem: THREE.Points;
     private lineSystem: THREE.LineSegments;
-
     private pointMat: THREE.ShaderMaterial;
 
     public constructor() {
         this.group = new THREE.Group();
 
-        // --- NODES (Points) ---
+        // --- 1. NODES (Points) ---
         const nodeGeo = new THREE.BufferGeometry();
 
         const positions: number[] = [];
         const colors: number[] = [];
         const sizes: number[] = [];
+        const starts: number[] = [];
+        const ends: number[] = [];
 
         for (const n of DATA_SET.nodes) {
             positions.push(n.position[0], n.position[1], n.position[2]);
@@ -25,14 +26,18 @@ export class GraphManager {
             const c = new THREE.Color(n.color);
             colors.push(c.r, c.g, c.b);
 
-            // Visual Hierarchy: Hubs are noticeably larger
             if (n.type === "HUB") {
-                sizes.push(1.8); // Big anchor nodes
+                sizes.push(1.8);
+            } else if (n.type === "RUIN") {
+                sizes.push(1.5);
             } else if (n.type === "MINOR") {
-                sizes.push(0.8); // Standard data points
+                sizes.push(0.8);
             } else {
-                sizes.push(0.5); // Debris/Background noise
+                sizes.push(0.5);
             }
+
+            starts.push(n.start || 0);
+            ends.push(n.end || 999);
         }
 
         nodeGeo.setAttribute(
@@ -47,53 +52,57 @@ export class GraphManager {
             "aSize",
             new THREE.Float32BufferAttribute(sizes, 1)
         );
+        nodeGeo.setAttribute(
+            "aStart",
+            new THREE.Float32BufferAttribute(starts, 1)
+        );
+        nodeGeo.setAttribute("aEnd", new THREE.Float32BufferAttribute(ends, 1));
 
         const dotTex = this.createDotTexture();
 
         this.pointMat = new THREE.ShaderMaterial({
             transparent: true,
             depthWrite: false,
-            // NormalBlending keeps edges crisp. Additive makes them glowy/fuzzy.
-            // For Obsidian style, NormalBlending is often better, or very subtle Additive.
             blending: THREE.NormalBlending,
-
             uniforms: {
                 uMap: { value: dotTex },
                 uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
-                uBaseSize: { value: 12.0 }, // Base pixel size for nodes
+                uBaseSize: { value: 12.0 },
+                uCurrentYear: { value: 0 },
             },
             vertexShader: `
                 attribute float aSize;
                 attribute vec3 aColor;
+                attribute float aStart;
+                attribute float aEnd;
                 varying vec3 vColor;
+                varying float vVisible;
                 uniform float uPixelRatio;
                 uniform float uBaseSize;
-
+                uniform float uCurrentYear;
                 void main() {
                     vColor = aColor;
+                    float isAlive = step(aStart, uCurrentYear) * step(uCurrentYear, aEnd);
+                    vVisible = isAlive;
                     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-                    
-                    // Distance attenuation (nodes get smaller further away)
-                    float dist = -mvPosition.z;
-                    float size = uBaseSize * aSize * uPixelRatio;
-                    
-                    // Clamp size so distant nodes don't vanish completely
-                    gl_PointSize = size * (40.0 / dist);
-                    
-                    gl_Position = projectionMatrix * mvPosition;
+                    if (isAlive < 0.5) {
+                         gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                    } else {
+                        float dist = -mvPosition.z;
+                        float size = uBaseSize * aSize * uPixelRatio;
+                        gl_PointSize = size * (40.0 / dist);
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
                 }
             `,
             fragmentShader: `
                 uniform sampler2D uMap;
                 varying vec3 vColor;
-
+                varying float vVisible;
                 void main() {
+                    if (vVisible < 0.1) discard;
                     vec4 tex = texture2D(uMap, gl_PointCoord);
-                    
-                    // Discard transparent pixels for performance
                     if (tex.a < 0.05) discard;
-
-                    // Multiply texture alpha by vertex color
                     gl_FragColor = vec4(vColor, tex.a);
                 }
             `,
@@ -102,22 +111,18 @@ export class GraphManager {
         this.pointSystem = new THREE.Points(nodeGeo, this.pointMat);
         this.group.add(this.pointSystem);
 
-        // --- LINKS (LineSegments) ---
+        // --- 2. LINKS (LineSegments) ---
         const lineGeo = new THREE.BufferGeometry();
         const linePos: number[] = [];
         const lineCols: number[] = [];
-
-        // Darker, subtler line colors for the background web
-        const c1 = new THREE.Color(0x1a2b3c); // Dark Blue-Grey
-        const c2 = new THREE.Color(0x2d4e66); // Lighter Blue-Grey
+        const c1 = new THREE.Color(0x1a2b3c);
+        const c2 = new THREE.Color(0x2d4e66);
 
         for (const e of DATA_SET.edges) {
             const n1 = DATA_SET.nodes[e.from];
             const n2 = DATA_SET.nodes[e.to];
-
             linePos.push(n1.position[0], n1.position[1], n1.position[2]);
             linePos.push(n2.position[0], n2.position[1], n2.position[2]);
-
             lineCols.push(c1.r, c1.g, c1.b);
             lineCols.push(c2.r, c2.g, c2.b);
         }
@@ -134,7 +139,7 @@ export class GraphManager {
         const lineMat = new THREE.LineBasicMaterial({
             vertexColors: true,
             transparent: true,
-            opacity: 0.08, // Very faint! Let them stack to create density.
+            opacity: 0.08,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
         });
@@ -142,7 +147,9 @@ export class GraphManager {
         this.lineSystem = new THREE.LineSegments(lineGeo, lineMat);
         this.group.add(this.lineSystem);
 
-        // Handle resize for pixel ratio
+        // --- 3. LAGRANGE BELT (Replaced Generic Orbits) ---
+        this.createLagrangeBelt();
+
         window.addEventListener("resize", () => {
             this.pointMat.uniforms.uPixelRatio.value = Math.min(
                 window.devicePixelRatio,
@@ -151,34 +158,27 @@ export class GraphManager {
         });
     }
 
-    public update(time: number): void {
+    public update(time: number, currentYear: number): void {
         const t = time * 0.001;
-        // Subtle "breathing" of node sizes
         this.pointMat.uniforms.uBaseSize.value = 12.0 + Math.sin(t * 0.5) * 1.0;
-
-        // Slow rotation of the whole system
         this.group.rotation.y = t * 0.02;
+        this.pointMat.uniforms.uCurrentYear.value = currentYear;
     }
 
-    // Create a crisp circle texture with a soft edge
     private createDotTexture(): THREE.Texture {
         const size = 128;
         const canvas = document.createElement("canvas");
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext("2d");
-
         if (!ctx) throw new Error("Canvas 2D context failed");
 
         const c = size / 2;
-
-        // Draw the main solid core
         ctx.beginPath();
         ctx.arc(c, c, size * 0.3, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(255, 255, 255, 1.0)";
         ctx.fill();
 
-        // Draw a subtle glow/halo
         const grad = ctx.createRadialGradient(
             c,
             c,
@@ -189,7 +189,6 @@ export class GraphManager {
         );
         grad.addColorStop(0, "rgba(255, 255, 255, 0.5)");
         grad.addColorStop(1, "rgba(255, 255, 255, 0.0)");
-
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(c, c, size * 0.5, 0, Math.PI * 2);
@@ -198,5 +197,62 @@ export class GraphManager {
         const tex = new THREE.CanvasTexture(canvas);
         tex.needsUpdate = true;
         return tex;
+    }
+
+    // New Helper: Connects major colonies in a smooth orbital loop
+    private createLagrangeBelt() {
+        // 1. Filter for relevant hubs (Sides, Moon, Axis)
+        // We exclude Earth Core to keep the ring essentially "orbital"
+        const hubs = DATA_SET.nodes.filter(
+            (n) =>
+                n.id !== "earth_core" &&
+                (n.type === "HUB" ||
+                    n.id.includes("Side") ||
+                    n.id.includes("Moon") ||
+                    n.id.includes("Luna") ||
+                    n.id.includes("Axis"))
+        );
+
+        if (hubs.length < 3) return; // Need at least 3 points for a meaningful loop
+
+        // 2. Sort by Polar Angle (XZ Plane)
+        // This ensures we connect them in a circle rather than a messy zigzag
+        const sortedHubs = hubs
+            .map((n) => {
+                const vec = new THREE.Vector3(
+                    n.position[0],
+                    n.position[1],
+                    n.position[2]
+                );
+                const angle = Math.atan2(vec.z, vec.x); // Angle around Y-axis
+                return { vec, angle };
+            })
+            .sort((a, b) => a.angle - b.angle);
+
+        // 3. Create a Smooth Closed Curve
+        const points = sortedHubs.map((item) => item.vec);
+        const curve = new THREE.CatmullRomCurve3(
+            points,
+            true,
+            "centripetal",
+            0.5
+        );
+
+        // Sample the curve for smoothness
+        const curvePoints = curve.getPoints(200);
+        const geometry = new THREE.BufferGeometry().setFromPoints(curvePoints);
+
+        // 4. Create Material (HUD Style)
+        const material = new THREE.LineBasicMaterial({
+            color: 0x00aaff, // Cyan/Electric Blue
+            transparent: true,
+            opacity: 0.25, // Subtle overlay
+            blending: THREE.AdditiveBlending,
+            depthWrite: false, // No depth writing (transparency fix)
+            depthTest: false, // ALWAYS render on top (HUD style)
+        });
+
+        const belt = new THREE.LineLoop(geometry, material);
+        this.group.add(belt);
     }
 }
