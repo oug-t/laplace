@@ -1,84 +1,78 @@
-/**
- * Gundam Universal Century Timeline - Core Data Layer
- * 地球圈（Earth Sphere）地理数据符合UC标准设定
- * 坐标单位：抽象距离单位（1单位 ≈ 1000公里）
- */
+import * as THREE from 'three';
 
 export interface GraphNode {
     id: string;
     position: [number, number, number]; // [x, y, z]
     type: 'HUB' | 'MINOR' | 'DEBRIS' | 'RUIN';
-    size: number; // 视觉大小乘数
-    color: number; // HEX颜色值
-    start?: number; // UC开始年份
-    end?: number; // UC结束年份
-    name?: string; // 显示名称
-    desc?: string; // 描述文本
+    size: number; // Visual size multiplier
+    color: number; // HEX color
+    start?: number; // Active start year
+    end?: number; // Active end year
+    name?: string; // Display name
+    desc?: string; // Description
 }
 
 export interface GraphEdge {
-    from: string; // 起点节点ID
-    to: string; // 终点节点ID
-    type?: 'MAJOR' | 'MINOR' | 'SIDE'; // 连接线类型
-    active?: number[]; // 活跃时间区间 [start, end]
+    from: number; // Index in the nodes array (for performance in LineSegments)
+    to: number; // Index in the nodes array
+    opacity: number;
+    type?: 'MAJOR' | 'MINOR' | 'SIDE';
 }
 
-// 高达UC配色方案 - EVE风格
+// Gundam UC Palette - EVE Style
 const PALETTE = {
-    // 主要节点
-    NODE_HUB: 0xaaccff, // 枢纽 - 淡蓝色
-    NODE_MINOR: 0x334455, // 次要节点 - 深蓝灰
-    NODE_DEBRIS: 0x445566, // 残骸 - 中灰蓝
-    NODE_RUIN: 0xaa6655, // 遗迹 - 铜锈红
+    // Nodes
+    NODE_HUB: 0xaaccff, // Pale Cyan
+    NODE_MINOR: 0x334455, // Dark Blue-Grey
+    NODE_DEBRIS: 0x445566, // Grey-Blue
+    NODE_RUIN: 0xaa6655, // Rust Red
 
-    // 势力/派系
-    EFSF: 0x0088ff, // 地球联邦 - 亮蓝色
-    ZEON: 0xff5500, // 吉翁 - 橙红色
-    AEUG: 0x00cc88, // 奥古 - 青绿色
-    TITANS: 0xaa22ff, // 提坦斯 - 紫色
-    NEO_ZEON: 0xff3366, // 新吉翁 - 品红
+    // Special Locations
+    EARTH: 0x00aaff, // Cyan
+    MOON: 0x8899aa, // Moon Grey
+    COLONY: 0x44dd88, // Pale Green
+    LAGRANGE: 0x6699ff, // Lavender Blue
+    LUNAR_CITY: 0xffeeaa, // Pale Gold
 
-    // 特殊地点
-    EARTH: 0x00aaff, // 地球 - 青色
-    MOON: 0x8899aa, // 月球 - 月灰色
-    COLONY: 0x44dd88, // 殖民地 - 淡绿色
-    LAGRANGE: 0x6699ff, // 拉格朗日点 - 淡紫蓝
+    // Factions
+    EFSF: 0x0088ff,
+    ZEON: 0xff5500,
+    TITANS: 0xaa22ff,
+    NEO_ZEON: 0xff3366,
 
-    // 功能/事件
-    BATTLE: 0xff4444, // 战斗 - 警示红
-    EVENT: 0xffcc00, // 重大事件 - 琥珀色
-    TECH: 0x00ddff, // 技术突破 - 亮青色
+    // Special
+    LAPLACE_GOLD: 0xffd700,
+    LAPLACE_RUIN: 0x444444,
+    ACCENT: 0xffaa00,
 };
 
+export const DATA_SET = generateEarthSphere();
+
 /**
- * 计算地月系拉格朗日点坐标
- * 假设月球在X轴正方向，轨道半径=15单位
- * 所有点都在XZ平面（Y=0），符合Three.js XZ平面惯例
+ * Calculates Lagrange Points for the Earth-Moon system.
+ * Assumes Moon is on the X-axis at `moonDistance`.
+ * All points are on the XZ plane (Y=0).
  */
-function calculateLagrangePoints(moonDistance: number = 15): {
-    L1: [number, number, number];
-    L2: [number, number, number];
-    L3: [number, number, number];
-    L4: [number, number, number];
-    L5: [number, number, number];
+function calculateLagrangePoints(moonDistance: number): {
+    [key: string]: [number, number, number];
 } {
-    // 地月质量比 μ = M_moon / (M_earth + M_moon) ≈ 0.01215
+    // Mass ratio mu = M_moon / (M_earth + M_moon) approx 0.01215
     const mu = 0.01215;
 
-    // L1: 地月之间，约0.85倍地月距离（精确解需解方程，此处用近似）
-    const L1_distance = moonDistance * (1 - Math.pow(mu / 3, 1 / 3));
-    const L1: [number, number, number] = [L1_distance, 0, 0];
+    // L1: Between Earth and Moon
+    const L1_dist = moonDistance * (1 - Math.pow(mu / 3, 1 / 3));
+    const L1: [number, number, number] = [L1_dist, 0, 0];
 
-    // L2: 月球外侧，约1.15倍地月距离
-    const L2_distance = moonDistance * (1 + Math.pow(mu / 3, 1 / 3));
-    const L2: [number, number, number] = [L2_distance, 0, 0];
+    // L2: Beyond the Moon
+    const L2_dist = moonDistance * (1 + Math.pow(mu / 3, 1 / 3));
+    const L2: [number, number, number] = [L2_dist, 0, 0];
 
-    // L3: 地球背面，略大于地月距离
-    const L3_distance = moonDistance * (1 + (5 / 12) * mu); // 近似公式
-    const L3: [number, number, number] = [-L3_distance, 0, 0];
+    // L3: Opposite side of Earth
+    const L3_dist = moonDistance * (1 + (5 / 12) * mu);
+    const L3: [number, number, number] = [-L3_dist, 0, 0];
 
-    // L4、L5: 月球轨道前后60°的等边三角形点
-    const angle60 = Math.PI / 3; // 60°弧度
+    // L4 & L5: 60 degrees ahead/behind Moon orbit
+    const angle60 = Math.PI / 3;
     const L4: [number, number, number] = [
         moonDistance * Math.cos(angle60),
         0,
@@ -94,226 +88,278 @@ function calculateLagrangePoints(moonDistance: number = 15): {
     return { L1, L2, L3, L4, L5 };
 }
 
-/**
- * 生成地月系节点（地球圈核心）
- * 符合高达UC标准地理设定
- */
-function generateEarthSphere(): GraphNode[] {
-    const earth: GraphNode = {
+function generateEarthSphere() {
+    const nodes: GraphNode[] = [];
+    const edges: GraphEdge[] = [];
+
+    // --- REALISTIC CONSTANTS (Modified for Visuals) ---
+    const EARTH_RADIUS = 4.0;
+    // Compressed distance scale (Game/Cinematic Scale)
+    const DIST_SCALE = 18.0;
+    const MOON_DIST = EARTH_RADIUS * DIST_SCALE; // approx 72.0
+
+    // 1. EARTH CORE
+    nodes.push({
         id: 'earth_core',
         position: [0, 0, 0],
         type: 'HUB',
         size: 4.0,
         color: PALETTE.EARTH,
         name: 'Earth',
-        desc: '地球 - 人类文明的发源地，地球联邦政府所在地。UC世纪的政治、经济、文化中心。',
-    };
+        desc: 'Earth - The cradle of humanity and capital of the Earth Federation.',
+        start: 0,
+        end: 999,
+    });
 
-    const moonOrbitRadius = 15;
-    const moon: GraphNode = {
+    // Generate GEO Belt (Debris/Satellites)
+    for (let i = 0; i < 300; i++) {
+        const r = 5.0 + Math.random() * 2.0;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const yScale = 0.2; // Flatten belt
+
+        nodes.push({
+            id: `geo_${i}`,
+            position: [
+                r * Math.sin(phi) * Math.cos(theta),
+                r * Math.sin(phi) * Math.sin(theta) * yScale,
+                r * Math.cos(phi),
+            ],
+            type: 'DEBRIS',
+            size: 0.4,
+            color: PALETTE.NODE_DEBRIS,
+            start: 0,
+            end: 999,
+        });
+    }
+
+    // 2. MOON
+    nodes.push({
         id: 'moon',
-        position: [moonOrbitRadius, 0, 0],
+        position: [MOON_DIST, 0, 0],
         type: 'HUB',
         size: 2.0,
         color: PALETTE.MOON,
         name: 'Moon',
-        desc: '月球 - 地球唯一的天然卫星。UC 0020年代开始大规模殖民，拥有冯·布朗、格拉纳达等都市。',
-    };
-
-    // 计算拉格朗日点
-    const { L1, L2, L3, L4, L5 } = calculateLagrangePoints(moonOrbitRadius);
-
-    const lagrangeL1: GraphNode = {
-        id: 'lagrange_l1',
-        position: L1,
-        type: 'MINOR',
-        size: 1.2,
-        color: PALETTE.LAGRANGE,
-        name: 'L1 Point',
-        desc: '地月系第一拉格朗日点 - 位于地球与月球之间，重力平衡点。UC时代初期的重要导航点。',
-    };
-
-    const lagrangeL2: GraphNode = {
-        id: 'lagrange_l2',
-        position: L2,
-        type: 'MINOR',
-        size: 1.2,
-        color: PALETTE.LAGRANGE,
-        name: 'L2 Point',
-        desc: '地月系第二拉格朗日点 - 位于月球外侧，重力平衡点。UC 0080年代后成为重要军事据点。',
-    };
-
-    const lagrangeL3: GraphNode = {
-        id: 'lagrange_l3',
-        position: L3,
-        type: 'MINOR',
-        size: 1.2,
-        color: PALETTE.LAGRANGE,
-        name: 'L3 Point',
-        desc: '地月系第三拉格朗日点 - 位于地球背面，与月球轨道相对。传说中的暗面区域。',
-    };
-
-    const lagrangeL4: GraphNode = {
-        id: 'lagrange_l4',
-        position: L4,
-        type: 'HUB',
-        size: 1.5,
-        color: PALETTE.COLONY,
-        name: 'L4 Cluster',
-        desc: '地月系第四拉格朗日点 - 特洛伊点，UC 0050年代开始建设大型殖民地群。',
-    };
-
-    const lagrangeL5: GraphNode = {
-        id: 'lagrange_l5',
-        position: L5,
-        type: 'HUB',
-        size: 1.5,
-        color: PALETTE.COLONY,
-        name: 'L5 Cluster',
-        desc: '地月系第五拉格朗日点 - 特洛伊点，Side 7所在地。UC 0079年V作战启动点。',
-    };
-
-    // 月球城市 - 紧贴月球表面（距离月球中心1.2单位）
-    const vonBraun: GraphNode = {
-        id: 'von_braun',
-        position: [
-            moonOrbitRadius + 1.2 * Math.cos(0), // 月球正面（朝向地球）
-            0.5, // 略高于月球表面
-            moonOrbitRadius + 1.2 * Math.sin(0),
-        ],
-        type: 'MINOR',
-        size: 0.8,
-        color: PALETTE.NODE_MINOR,
-        start: 20, // UC 0020
-        name: 'Von Braun City',
-        desc: '冯·布朗市 - 月球正面最大都市，阿纳海姆电子公司总部所在地，UC世纪科技研发中心。',
-    };
-
-    const granada: GraphNode = {
-        id: 'granada',
-        position: [
-            moonOrbitRadius + 1.2 * Math.cos(Math.PI), // 月球背面（背对地球）
-            -0.5, // 略低于月球表面
-            moonOrbitRadius + 1.2 * Math.sin(Math.PI),
-        ],
-        type: 'MINOR',
-        size: 0.8,
-        color: PALETTE.NODE_MINOR,
-        start: 25, // UC 0025
-        name: 'Granada',
-        desc: '格拉纳达 - 月球背面工业都市，吉翁公国月球据点，大型宇宙舰船建造基地。',
-    };
-
-    // 地球轨道空间站（示例）
-    const jaburoOrbit: GraphNode = {
-        id: 'jaburo_orbit',
-        position: [0, 5, 0], // 地球正上方
-        type: 'MINOR',
-        size: 1.0,
-        color: PALETTE.EFSF,
-        name: 'Jaburo Orbit',
-        desc: '贾布罗轨道站 - 地球联邦军轨道防卫司令部，连接地球与宇宙的重要枢纽。',
-    };
-
-    return [
-        earth,
-        moon,
-        lagrangeL1,
-        lagrangeL2,
-        lagrangeL3,
-        lagrangeL4,
-        lagrangeL5,
-        vonBraun,
-        granada,
-        jaburoOrbit,
-    ];
-}
-
-/**
- * 生成地月系连接关系
- * 反映政治、军事、经济联系
- */
-function generateEarthSphereEdges(): GraphEdge[] {
-    return [
-        // 核心连接 - 地月轴线
-        { from: 'earth_core', to: 'moon', type: 'MAJOR' },
-
-        // 地球与拉格朗日点连接
-        { from: 'earth_core', to: 'lagrange_l1', type: 'MINOR' },
-        { from: 'earth_core', to: 'lagrange_l2', type: 'MINOR' },
-        { from: 'earth_core', to: 'lagrange_l3', type: 'MINOR' },
-        { from: 'earth_core', to: 'lagrange_l4', type: 'MAJOR' },
-        { from: 'earth_core', to: 'lagrange_l5', type: 'MAJOR' },
-
-        // 月球与拉格朗日点连接
-        { from: 'moon', to: 'lagrange_l1', type: 'MINOR' },
-        { from: 'moon', to: 'lagrange_l2', type: 'MINOR' },
-        { from: 'moon', to: 'lagrange_l4', type: 'MINOR' },
-        { from: 'moon', to: 'lagrange_l5', type: 'MINOR' },
-
-        // 月球城市连接
-        { from: 'moon', to: 'von_braun', type: 'SIDE' },
-        { from: 'moon', to: 'granada', type: 'SIDE' },
-
-        // 拉格朗日点之间的连接（形成三角网络）
-        { from: 'lagrange_l4', to: 'lagrange_l5', type: 'MINOR' },
-        { from: 'lagrange_l1', to: 'lagrange_l2', type: 'MINOR' },
-
-        // 地球轨道连接
-        { from: 'earth_core', to: 'jaburo_orbit', type: 'SIDE' },
-        { from: 'jaburo_orbit', to: 'moon', type: 'MINOR' },
-    ];
-}
-
-// 导出完整数据集
-export const DATA_SET = {
-    nodes: generateEarthSphere(),
-    edges: generateEarthSphereEdges(),
-
-    // 时间范围：UC 0001 - UC 0200（覆盖主要UC历史）
-    timeline: {
-        start: 1, // UC 0001
-        end: 200, // UC 0200
-        majorEvents: [
-            { year: 79, name: '一年战争爆发', color: PALETTE.BATTLE },
-            { year: 87, name: '格利普斯战役', color: PALETTE.TITANS },
-            { year: 88, name: '第一次新吉翁战争', color: PALETTE.NEO_ZEON },
-            { year: 93, name: '第二次新吉翁战争', color: PALETTE.NEO_ZEON },
-            { year: 105, name: '赞斯卡尔战争', color: PALETTE.EVENT },
-            { year: 153, name: '金星圈冲突', color: PALETTE.BATTLE },
-        ],
-    },
-
-    // 势力时间线（用于动态着色）
-    factions: {
-        EFSF: { start: 10, end: 200, color: PALETTE.EFSF },
-        ZEON: { start: 68, end: 80, color: PALETTE.ZEON },
-        AEUG: { start: 87, end: 88, color: PALETTE.AEUG },
-        TITANS: { start: 83, end: 88, color: PALETTE.TITANS },
-        NEO_ZEON: { start: 88, end: 93, color: PALETTE.NEO_ZEON },
-    },
-};
-
-/**
- * 工具函数：根据年份获取节点颜色（考虑势力控制变化）
- */
-export function getNodeColorForYear(nodeId: string, year: number): number {
-    // 简化的逻辑：返回节点基础颜色
-    // 后期可扩展为根据年份和势力关系动态着色
-    const node = DATA_SET.nodes.find((n) => n.id === nodeId);
-    return node ? node.color : PALETTE.NODE_MINOR;
-}
-
-/**
- * 工具函数：根据年份获取活跃的连接
- */
-export function getActiveEdgesForYear(year: number): GraphEdge[] {
-    return DATA_SET.edges.filter((edge) => {
-        if (!edge.active) return true; // 没有时间限制则始终活跃
-
-        const [start, end] = edge.active;
-        return year >= start && year <= end;
+        desc: "The Moon - Earth's only natural satellite. Home to Von Braun and Granada.",
+        start: 0,
+        end: 999,
     });
-}
 
-export default DATA_SET;
+    // 3. LAGRANGE POINTS
+    const { L1, L2, L3, L4, L5 } = calculateLagrangePoints(MOON_DIST);
+
+    const lPoints = [
+        {
+            id: 'L1',
+            pos: L1,
+            name: 'L1 Point',
+            desc: 'Between Earth and Moon.',
+        },
+        {
+            id: 'L2',
+            pos: L2,
+            name: 'L2 Point',
+            desc: 'Beyond the Moon (Side 3).',
+        },
+        {
+            id: 'L3',
+            pos: L3,
+            name: 'L3 Point',
+            desc: 'Opposite Side (Side 7).',
+        },
+        {
+            id: 'L4',
+            pos: L4,
+            name: 'L4 Cluster',
+            desc: 'Trojan Point (Side 2, Side 6).',
+        },
+        {
+            id: 'L5',
+            pos: L5,
+            name: 'L5 Cluster',
+            desc: 'Trojan Point (Side 1, Side 4, Side 5).',
+        },
+    ];
+
+    lPoints.forEach((p) => {
+        nodes.push({
+            id: p.id,
+            position: p.pos,
+            type: 'MINOR', // Or HUB if major colonies exist
+            size: 1.2,
+            color: PALETTE.LAGRANGE,
+            name: p.name,
+            desc: p.desc,
+            start: 0,
+            end: 999,
+        });
+
+        // Add Cluster "Clouds" around L-Points to simulate colonies
+        for (let i = 0; i < 30; i++) {
+            const spread = 3.0;
+            nodes.push({
+                id: `${p.id}_colony_${i}`,
+                position: [
+                    p.pos[0] + (Math.random() - 0.5) * spread,
+                    p.pos[1] + (Math.random() - 0.5) * spread,
+                    p.pos[2] + (Math.random() - 0.5) * spread,
+                ],
+                type: 'MINOR',
+                size: 0.6,
+                color: PALETTE.COLONY,
+                start: 50, // Colonies built later
+                end: 999,
+            });
+        }
+    });
+
+    // 4. LUNAR CITIES (Relative to Moon Position)
+    // Von Braun: Faces Earth (Less X than Moon)
+    nodes.push({
+        id: 'von_braun',
+        position: [MOON_DIST - 1.2, 0, 0],
+        type: 'MINOR',
+        size: 0.8,
+        color: PALETTE.LUNAR_CITY,
+        name: 'Von Braun',
+        desc: 'First permanent lunar city. HQ of Anaheim Electronics.',
+        start: 20,
+        end: 999,
+    });
+
+    // Granada: Faces Deep Space (More X than Moon)
+    nodes.push({
+        id: 'granada',
+        position: [MOON_DIST + 1.2, 0, 0],
+        type: 'MINOR',
+        size: 0.8,
+        color: PALETTE.ZEON, // Zeon influence
+        name: 'Granada',
+        desc: 'Industrial lunar city. Major Zeon stronghold.',
+        start: 25,
+        end: 999,
+    });
+
+    // 5. LAPLACE (Special Logic)
+    // Placed at a high orbital position (e.g., Polar Orbit or high equatorial)
+    const laplacePos: [number, number, number] = [0, 8, 0];
+
+    // Laplace Station (Golden Era)
+    nodes.push({
+        id: 'laplace_station',
+        position: laplacePos,
+        type: 'HUB',
+        size: 2.5,
+        color: PALETTE.LAPLACE_GOLD,
+        name: 'Laplace Prime Minister Residence',
+        start: 0,
+        end: 1.1, // Destroyed in UC 0001
+    });
+
+    // Laplace Ruins (The Ghost)
+    nodes.push({
+        id: 'laplace_ruins',
+        position: laplacePos,
+        type: 'RUIN',
+        size: 1.8,
+        color: PALETTE.LAPLACE_RUIN,
+        name: 'Laplace Ruins',
+        start: 1.1,
+        end: 96.5, // Falling to Earth in UC 0096
+    });
+
+    // Debris field around Laplace
+    for (let i = 0; i < 20; i++) {
+        nodes.push({
+            id: `laplace_debris_${i}`,
+            position: [
+                laplacePos[0] + (Math.random() - 0.5) * 1.5,
+                laplacePos[1] + (Math.random() - 0.5) * 1.5,
+                laplacePos[2] + (Math.random() - 0.5) * 1.5,
+            ],
+            type: 'DEBRIS',
+            size: 0.4,
+            color: PALETTE.NODE_DEBRIS,
+            start: 1.1,
+            end: 96.5,
+        });
+    }
+
+    // --- GENERATE EDGES (LINKS) ---
+    // Note: GraphManager expects edges to use INDEXES, not IDs.
+    // We must find the index of the nodes we want to link.
+
+    const getId = (id: string) => nodes.findIndex((n) => n.id === id);
+
+    // Core Axis: Earth -> Moon
+    edges.push({
+        from: getId('earth_core'),
+        to: getId('moon'),
+        opacity: 0.2,
+        type: 'MAJOR',
+    });
+
+    // Earth -> L-Points
+    ['L1', 'L2', 'L3', 'L4', 'L5'].forEach((lid) => {
+        const idx = getId(lid);
+        if (idx !== -1)
+            edges.push({ from: 0, to: idx, opacity: 0.1, type: 'MINOR' });
+    });
+
+    // Moon -> L-Points (Gravity influence)
+    edges.push({
+        from: getId('moon'),
+        to: getId('L1'),
+        opacity: 0.1,
+        type: 'MINOR',
+    });
+    edges.push({
+        from: getId('moon'),
+        to: getId('L2'),
+        opacity: 0.1,
+        type: 'MINOR',
+    });
+    edges.push({
+        from: getId('moon'),
+        to: getId('L4'),
+        opacity: 0.05,
+        type: 'SIDE',
+    });
+    edges.push({
+        from: getId('moon'),
+        to: getId('L5'),
+        opacity: 0.05,
+        type: 'SIDE',
+    });
+
+    // Moon -> Cities
+    edges.push({
+        from: getId('moon'),
+        to: getId('von_braun'),
+        opacity: 0.4,
+        type: 'SIDE',
+    });
+    edges.push({
+        from: getId('moon'),
+        to: getId('granada'),
+        opacity: 0.4,
+        type: 'SIDE',
+    });
+
+    // Laplace -> Earth (The Elevator/Orbit connection)
+    edges.push({
+        from: getId('earth_core'),
+        to: getId('laplace_station'),
+        opacity: 0.3,
+        type: 'MAJOR',
+    });
+    edges.push({
+        from: getId('earth_core'),
+        to: getId('laplace_ruins'),
+        opacity: 0.1,
+        type: 'MINOR',
+    });
+
+    return { nodes, edges };
+}

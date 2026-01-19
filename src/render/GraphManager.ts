@@ -70,7 +70,6 @@ export class GraphManager {
 
         const dotTex = this.createDotTexture();
 
-        // FIXED: Correct uniforms declaration
         this.pointMat = new THREE.ShaderMaterial({
             transparent: true,
             depthWrite: false,
@@ -81,11 +80,8 @@ export class GraphManager {
                 uBaseSize: { value: 8.0 },
                 uCurrentYear: { value: 0 },
                 uTime: { value: 0.0 },
-                // Removed uHoverYear and uFocusRadius since shader doesn't use them
-                // Added uHoveredNode for hover effect
                 uHoveredNode: { value: -1.0 },
             },
-            // FIXED: Corrected vertex shader
             vertexShader: `
                 attribute float aSize;
                 attribute vec3 aColor;

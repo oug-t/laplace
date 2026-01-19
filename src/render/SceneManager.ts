@@ -37,7 +37,7 @@ export class SceneManager {
             0.1,
             2000
         );
-        this.camera.position.set(0, 15, 35);
+        this.camera.position.set(0, 60, 140);
         this.camera.lookAt(0, 0, 0);
 
         // Renderer
@@ -57,8 +57,8 @@ export class SceneManager {
         );
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
-        this.controls.minDistance = 5;
-        this.controls.maxDistance = 100;
+        this.controls.minDistance = 2;
+        this.controls.maxDistance = 500;
         this.controls.enablePan = true;
         this.controls.enableZoom = true;
 
@@ -178,7 +178,7 @@ export class SceneManager {
         this.moonGroup = new THREE.Group();
         this.scene.add(this.moonGroup);
 
-        const orbitRadius = 15;
+        const orbitRadius = 39;
         const orbitCurve = new THREE.EllipseCurve(
             0,
             0,
