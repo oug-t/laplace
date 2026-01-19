@@ -57,6 +57,21 @@ Object.assign(timeDisplay.style, {
 });
 document.body.appendChild(timeDisplay);
 
+const stateDisplay = document.createElement('div');
+Object.assign(stateDisplay.style, {
+    position: 'absolute',
+    top: '20px',
+    left: '20px',
+    color: '#ffcc00',
+    fontFamily: 'monospace',
+    fontSize: '12px',
+    background: 'rgba(0,0,0,0.5)',
+    padding: '8px',
+    borderRadius: '4px',
+    zIndex: '1001',
+});
+document.body.appendChild(stateDisplay);
+
 // Add time feedback UI
 const timeFeedback = document.createElement('div');
 Object.assign(timeFeedback.style, {
@@ -107,6 +122,20 @@ const handleKeyDown = (e: KeyboardEvent): void => {
         sceneMgr.setZoomEnabled(false);
         console.log('Shift pressed - zoom disabled');
     }
+
+    // Add keyboard shortcuts for testing
+    if (e.key === 'm' || e.key === 'M') {
+        timeCtrl.targetYear += 5;
+        console.log(`⏩ Time jumped +5 years to UC ${timeCtrl.targetYear}`);
+    }
+    if (e.key === 'n' || e.key === 'N') {
+        timeCtrl.targetYear -= 5;
+        console.log(`⏪ Time jumped -5 years to UC ${timeCtrl.targetYear}`);
+    }
+    if (e.key === 'r' || e.key === 'R') {
+        timeCtrl.targetYear = CONFIG.START_YEAR;
+        console.log(`🔁 Reset to UC ${CONFIG.START_YEAR}`);
+    }
 };
 
 const handleKeyUp = (e: KeyboardEvent): void => {
@@ -129,35 +158,164 @@ window.addEventListener('wheel', handleWheel);
 window.addEventListener('keydown', handleKeyDown);
 window.addEventListener('keyup', handleKeyUp);
 
+// Performance monitoring variables
+let lastTime = performance.now();
+let frames = 0;
+let fps = 60;
+let frameCounter = 0; // ⭐⭐ ADDED THIS MISSING VARIABLE ⭐⭐
+
 // Main render loop
 const animate = (): void => {
     requestAnimationFrame(animate);
 
+    // Calculate FPS
+    frames++;
+    const currentTime = performance.now();
+    if (currentTime >= lastTime + 1000) {
+        fps = Math.round((frames * 1000) / (currentTime - lastTime));
+        frames = 0;
+        lastTime = currentTime;
+    }
+
+    // Store previous state
+    const wasMoving = timeCtrl.isMoving && timeCtrl.isMoving();
+
     // Update time controller
     timeCtrl.update();
 
-    // Update UI displays
+    // Get current state
+    const isMoving = timeCtrl.isMoving && timeCtrl.isMoving();
+    const isInTransition = timeCtrl.inTransition && timeCtrl.inTransition();
+    const velocity = timeCtrl.getVelocity ? timeCtrl.getVelocity() : 0;
+
+    // Update main time display
     timeDisplay.textContent = `${CONFIG.TIME_PREFIX}${timeCtrl.currentYear.toFixed(2)}`;
 
-    // Update time feedback indicator
-    if (timeCtrl.isMoving && timeCtrl.isMoving()) {
-        timeFeedback.textContent = '▶';
-        timeFeedback.style.color = '#ffcc00';
-    } else {
-        timeFeedback.textContent = '▪';
-        timeFeedback.style.color = '#8899aa';
-    }
+    // Update time feedback with enhanced visuals
+    updateTimeFeedback(isMoving, isInTransition, velocity);
 
-    // Update transition feedback
-    if (timeCtrl.inTransition && timeCtrl.inTransition()) {
-        timeFeedback.style.color = '#ffcc00';
-    }
+    // Update state display with more info
+    updateStateDisplay(isMoving, isInTransition, velocity, fps);
 
-    // Render scene
+    // Render the scene
     sceneMgr.render(timeCtrl);
+
+    // Performance logging
+    logPerformance(fps, isMoving);
+
+    // Frame counter increment
+    frameCounter++;
 };
 
-// Start application
+function updateTimeFeedback(
+    isMoving: boolean,
+    isInTransition: boolean,
+    velocity: number
+): void {
+    if (isMoving) {
+        // Animated flowing time indicator
+        const flowSpeed = Math.min(Math.abs(velocity) * 10, 1);
+        const pulse =
+            0.8 + Math.sin(performance.now() * flowSpeed * 0.01) * 0.2;
+
+        timeFeedback.textContent = '▶';
+        timeFeedback.style.color = '#ffcc00';
+        timeFeedback.style.opacity = '1';
+        timeFeedback.style.transform = `scale(${pulse})`;
+        timeFeedback.style.textShadow = '0 0 10px rgba(255, 204, 0, 0.5)';
+    } else if (isInTransition) {
+        // Smooth transition indicator
+        const transitionProgress = (performance.now() % 2000) / 2000;
+        const rotation = transitionProgress * 360;
+
+        timeFeedback.textContent = '⟳';
+        timeFeedback.style.color = '#ffcc00';
+        timeFeedback.style.opacity = '0.7';
+        timeFeedback.style.transform = `rotate(${rotation}deg) scale(0.9)`;
+    } else {
+        //静止状态
+        timeFeedback.textContent = '▪';
+        timeFeedback.style.color = '#8899aa';
+        timeFeedback.style.opacity = '0.8';
+        timeFeedback.style.transform = 'scale(1)';
+        timeFeedback.style.textShadow = 'none';
+    }
+}
+
+function updateStateDisplay(
+    isMoving: boolean,
+    isInTransition: boolean,
+    velocity: number,
+    fps: number
+): void {
+    if (!stateDisplay) return;
+
+    const velocityColor =
+        Math.abs(velocity) > 0.1
+            ? '#ff6666'
+            : Math.abs(velocity) > 0.01
+              ? '#ffaa44'
+              : '#66cc66';
+
+    stateDisplay.innerHTML = `
+        <div style="
+            color: ${isMoving ? '#ffcc00' : '#8899aa'}; 
+            font-weight: ${isMoving ? 'bold' : 'normal'};
+            font-size: 14px;
+            margin-bottom: 4px;
+        ">
+            UC ${timeCtrl.currentYear.toFixed(2)}
+            ${isMoving ? ' ▶' : isInTransition ? ' ⟳' : ''}
+        </div>
+        
+        <div style="
+            font-size: 11px;
+            color: ${isMoving ? '#aaccff' : '#8899aa'};
+            margin-bottom: 2px;
+        ">
+            ${isMoving ? 'Time flowing' : 'Time静止'}
+            ${isInTransition ? ' (smoothing)' : ''}
+        </div>
+        
+        <div style="
+            font-size: 10px;
+            color: ${velocityColor};
+            margin-bottom: 2px;
+        ">
+            Velocity: ${velocity.toFixed(4)} yr/frame
+        </div>
+        
+        <div style="
+            font-size: 9px;
+            color: #667788;
+            border-top: 1px solid rgba(100, 120, 150, 0.2);
+            padding-top: 2px;
+            margin-top: 2px;
+        ">
+            ${fps} FPS | Shift+scroll for time | M/N/R for testing
+        </div>
+    `;
+}
+
+function logPerformance(fps: number, isMoving: boolean): void {
+    // Log performance issues
+    if (fps < 30 && frameCounter % 120 === 0) {
+        console.warn(`⚠️ Low FPS: ${fps} (time moving: ${isMoving})`);
+    }
+
+    // Log every 5 seconds
+    if (frameCounter % 300 === 0) {
+        console.log(
+            `📊 Performance: ${fps} FPS, Memory: ${
+                (performance as any).memory
+                    ? `Used ${Math.round((performance as any).memory.usedJSHeapSize / 1024 / 1024)}MB`
+                    : 'N/A'
+            }`
+        );
+    }
+}
+
+// Start the animation loop
 animate();
 
 // Debug exposure (development only)
@@ -171,11 +329,32 @@ if (process.env.NODE_ENV === 'development') {
     };
 
     // Debug console
-    console.log('Application started', {
+    console.log('Laplace Application started', {
         timeCtrl,
         sceneMgr,
         container: appContainer,
+        moonOrbitRadius: sceneMgr.getMoonOrbitRadius
+            ? sceneMgr.getMoonOrbitRadius()
+            : 'N/A',
     });
+
+    // Add moon distance monitoring
+    const monitorMoonDistance = () => {
+        if ((sceneMgr as any).moonGroup) {
+            const moonPos = (sceneMgr as any).moonGroup.position;
+            const distance = Math.sqrt(
+                moonPos.x * moonPos.x + moonPos.z * moonPos.z
+            );
+            const targetRadius = sceneMgr.getMoonOrbitRadius
+                ? sceneMgr.getMoonOrbitRadius()
+                : 40;
+            console.log(
+                `🌙 Moon monitoring: Distance=${distance.toFixed(1)}, Target=${targetRadius}, Error=${Math.abs(distance - targetRadius).toFixed(2)}`
+            );
+        }
+        setTimeout(monitorMoonDistance, 2000); // Check every 2 seconds
+    };
+    monitorMoonDistance();
 }
 
 // Error handling for missing methods
@@ -185,4 +364,22 @@ if (!timeCtrl.handleScroll) {
 
 if (!sceneMgr.handleZoom) {
     console.warn('SceneManager.handleZoom() is not implemented');
+}
+
+// Optional: Add moon position debug to window
+if (process.env.NODE_ENV === 'development') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).getMoonPosition = () => {
+        if ((sceneMgr as any).moonGroup) {
+            const pos = (sceneMgr as any).moonGroup.position;
+            const distance = Math.sqrt(pos.x * pos.x + pos.z * pos.z);
+            return {
+                x: pos.x.toFixed(2),
+                z: pos.z.toFixed(2),
+                distance: distance.toFixed(2),
+                angle: (Math.atan2(pos.z, pos.x) * 180) / Math.PI,
+            };
+        }
+        return 'Moon group not found';
+    };
 }

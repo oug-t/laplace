@@ -11,6 +11,9 @@ export interface InteractionData {
 }
 
 export class SceneManager {
+    // Class constant for moon orbit radius (single source of truth)
+    private static readonly MOON_ORBIT_RADIUS = 40;
+
     public scene: THREE.Scene;
     public camera: THREE.PerspectiveCamera;
     public renderer: THREE.WebGLRenderer;
@@ -25,10 +28,18 @@ export class SceneManager {
     private shiftPressed: boolean;
     private lastRenderTime: number;
 
+    // Moon orbit tracking
+    private moonOrbitAngle: number = 0;
+    private lastUpdateYear: number = 79;
+
     constructor(container: HTMLElement) {
         this.scene = new THREE.Scene();
         this.shiftPressed = false;
         this.lastRenderTime = performance.now();
+
+        // Initialize moon orbit parameters
+        this.moonOrbitAngle = 0;
+        this.lastUpdateYear = 79;
 
         // Camera
         this.camera = new THREE.PerspectiveCamera(
@@ -127,6 +138,13 @@ export class SceneManager {
         return this.shiftPressed;
     }
 
+    /**
+     * Get moon orbit radius (for debugging and external access)
+     */
+    public getMoonOrbitRadius(): number {
+        return SceneManager.MOON_ORBIT_RADIUS;
+    }
+
     private buildHoloEarth() {
         this.earthGroup = new THREE.Group();
         this.scene.add(this.earthGroup);
@@ -178,10 +196,10 @@ export class SceneManager {
         this.moonGroup = new THREE.Group();
         this.scene.add(this.moonGroup);
 
-        const orbitRadius = 39;
+        const orbitRadius = SceneManager.MOON_ORBIT_RADIUS;
         const orbitCurve = new THREE.EllipseCurve(
             0,
-            0,
+            0, // Center at Earth position
             orbitRadius,
             orbitRadius,
             0,
@@ -189,28 +207,89 @@ export class SceneManager {
             false,
             0
         );
-        const orbitGeo = new THREE.BufferGeometry().setFromPoints(
-            orbitCurve.getPoints(128)
-        );
+
+        const orbitPoints = orbitCurve.getPoints(100);
+        const orbitGeo = new THREE.BufferGeometry().setFromPoints(orbitPoints);
         const orbitMat = new THREE.LineBasicMaterial({
-            color: 0x334455,
+            color: 0x00aaff,
             transparent: true,
-            opacity: 0.2,
+            opacity: 0.7,
+            linewidth: 1,
         });
+
         const orbitLine = new THREE.LineLoop(orbitGeo, orbitMat);
-        orbitLine.rotation.x = Math.PI / 2;
+        orbitLine.rotation.x = Math.PI / 2; // rotate to XZ plane
+        orbitLine.name = 'moon_orbit';
         this.scene.add(orbitLine);
 
+        // Create moon mesh
         const moonGeo = new THREE.IcosahedronGeometry(1.0, 2);
         const moonWireGeo = new THREE.WireframeGeometry(moonGeo);
         const moonMat = new THREE.LineBasicMaterial({
-            color: 0x445566,
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.8,
+            linewidth: 1.5,
+        });
+
+        const moon = new THREE.LineSegments(moonWireGeo, moonMat);
+
+        moon.position.set(0, 0, 0); // moon object center inside moonGroup container
+        moon.name = 'moon';
+        this.moonGroup.add(moon);
+
+        this.moonGroup.position.set(orbitRadius, 0, 0);
+
+        // Add debug visualization
+        this.addDebugVisualization(orbitRadius);
+    }
+
+    /**
+     * Add debug visualization to verify moon position
+     */
+    private addDebugVisualization(orbitRadius: number): void {
+        // 1. Red marker at orbit start point (40, 0, 0)
+        const startMarker = new THREE.Mesh(
+            new THREE.SphereGeometry(0.3, 8, 8),
+            new THREE.MeshBasicMaterial({ color: 0xff0000 })
+        );
+        startMarker.position.set(orbitRadius, 0, 0);
+        startMarker.name = 'orbit_start_marker';
+        this.scene.add(startMarker);
+
+        // 2. Green line from Earth to orbit start
+        const radiusLineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(orbitRadius, 0, 0),
+        ]);
+        const radiusLineMat = new THREE.LineBasicMaterial({
+            color: 0x00ff00,
             transparent: true,
             opacity: 0.3,
         });
-        const moon = new THREE.LineSegments(moonWireGeo, moonMat);
-        moon.position.set(orbitRadius, 0, 0);
-        this.moonGroup.add(moon);
+        const radiusLine = new THREE.Line(radiusLineGeo, radiusLineMat);
+        radiusLine.name = 'earth_to_orbit_line';
+        this.scene.add(radiusLine);
+
+        // 3. Distance text indicators (every 90 degrees)
+        const angles = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2];
+        angles.forEach((angle, i) => {
+            const x = Math.cos(angle) * orbitRadius;
+            const z = Math.sin(angle) * orbitRadius;
+
+            const marker = new THREE.Mesh(
+                new THREE.BoxGeometry(0.2, 0.2, 0.2),
+                new THREE.MeshBasicMaterial({ color: 0xffff00 })
+            );
+            marker.position.set(x, 0, z);
+            marker.name = `orbit_marker_${i}`;
+            this.scene.add(marker);
+        });
+
+        console.log('✅ Debug visualization added');
+        console.log('   - Red sphere: Orbit start point');
+        console.log('   - Green line: Earth to orbit radius');
+        console.log('   - Yellow cubes: 90° markers');
     }
 
     public render(timeController: TimeController) {
@@ -218,10 +297,9 @@ export class SceneManager {
         this.controls.update();
 
         const currentYear = timeController.currentYear;
-        const normalizedYear = (currentYear - 1) / 99; // UC 0001-0100 normalized to 0-1
 
         // Temporal update for all systems
-        this.updateTemporalSystems(currentYear, normalizedYear, timeController);
+        this.updateTemporalSystems(currentYear, timeController);
 
         // EVE-inspired subtle background pulse
         this.updateBackgroundPulse(timeController);
@@ -236,28 +314,104 @@ export class SceneManager {
     /**
      * Update all temporal elements with current year context
      */
-    /**
-     * Update all temporal elements with current year context
-     */
     private updateTemporalSystems(
         currentYear: number,
-        normalizedYear: number,
         timeController: TimeController
     ): void {
-        // Moon orbital position (linked to timeline)
+        // === Moon orbit movement ===
         if (this.moonGroup) {
-            // Full orbit every ~10 UC years for visual reference
-            this.moonGroup.rotation.y = currentYear * 0.2;
+            // Calculate year delta
+            const yearDelta = currentYear - this.lastUpdateYear;
 
-            // FIX: Update moon position to follow orbit
-            const orbitRadius = 15;
-            const orbitProgress = currentYear * 0.2; // Same as rotation for consistency
-            this.moonGroup.position.x = Math.cos(orbitProgress) * orbitRadius;
-            this.moonGroup.position.z = Math.sin(orbitProgress) * orbitRadius;
-            this.moonGroup.position.y = 0;
+            // Only update orbit position when time is actually moving
+            if (timeController.isMoving && timeController.isMoving()) {
+                // Get time velocity
+                const timeVelocity = Math.abs(timeController.getVelocity());
+
+                if (timeVelocity > 0.0001) {
+                    // Orbit speed: 2π radians per 100 years (very slow)
+                    const orbitSpeedPerYear = (2 * Math.PI) / 100;
+
+                    // Update orbit angle based on year delta
+                    this.moonOrbitAngle =
+                        (this.moonOrbitAngle + yearDelta * orbitSpeedPerYear) %
+                        (2 * Math.PI);
+
+                    // Calculate moon position relative to Earth (0,0,0)
+                    const radius = SceneManager.MOON_ORBIT_RADIUS;
+                    const x = Math.cos(this.moonOrbitAngle) * radius;
+                    const z = Math.sin(this.moonOrbitAngle) * radius;
+
+                    // Set moon position - Earth is at (0,0,0)
+                    this.moonGroup.position.set(x, 0, z);
+
+                    // Moon self-rotation only when time is moving
+                    this.moonGroup.rotation.y += 0.001;
+
+                    // Calculate actual distance for verification
+                    const actualDistance = Math.sqrt(x * x + z * z);
+                    const distanceError = Math.abs(actualDistance - radius);
+
+                    // Log detailed debug info
+                    console.log(
+                        `🌙 Moon Update:\n` +
+                            `  Year: UC ${currentYear.toFixed(2)} (Δ: ${yearDelta.toFixed(3)})\n` +
+                            `  Angle: ${((this.moonOrbitAngle * 180) / Math.PI).toFixed(1)}°\n` +
+                            `  Position: (${x.toFixed(1)}, 0, ${z.toFixed(1)})\n` +
+                            `  Distance: ${actualDistance.toFixed(1)} / ${radius}\n` +
+                            `  Error: ${distanceError.toFixed(3)}`
+                    );
+
+                    if (distanceError > 0.5) {
+                        console.warn(
+                            `⚠️ Moon orbit error: ${distanceError.toFixed(2)} units`
+                        );
+                    }
+                }
+            } else {
+                // Time is NOT moving
+                console.log(
+                    `⏸️ Time静止: Moon angle=${((this.moonOrbitAngle * 180) / Math.PI).toFixed(1)}°`
+                );
+            }
+
+            // Update last recorded year
+            this.lastUpdateYear = currentYear;
         }
 
-        // Rest of your code...
+        // === Earth rotation ===
+        if (this.earthGroup) {
+            // Earth rotation only happens when time is moving
+            if (timeController.isMoving && timeController.isMoving()) {
+                const timeVelocity = Math.abs(timeController.getVelocity());
+
+                // Base rotation speed
+                this.earthGroup.rotation.y +=
+                    0.0005 * Math.max(timeVelocity * 10, 0.1);
+
+                // Hologrid reverse rotation (enhances 3D effect)
+                if (this.earthGroup.children[1]) {
+                    this.earthGroup.children[1].rotation.y -=
+                        0.0003 * Math.max(timeVelocity * 10, 0.1);
+                }
+
+                // Data points pulse effect when time is moving fast
+                if (this.earthGroup.children[2] && timeVelocity > 0.01) {
+                    const pulse = Math.sin(performance.now() * 0.005) * 0.1 + 1;
+                    this.earthGroup.children[2].scale.setScalar(pulse);
+                }
+            } else {
+                // Time is NOT moving: reset data points scale, earth doesn't rotate
+                if (this.earthGroup.children[2]) {
+                    this.earthGroup.children[2].scale.setScalar(1);
+                }
+            }
+        }
+
+        // Battle manager update
+        if (this.battleMgr) {
+            this.battleMgr.update(currentYear);
+        }
     }
 
     /**
